@@ -38,7 +38,7 @@ team_t team = {
 /*
  * If NEXT_FIT defined use next fit search, else use first-fit search 
  */
-#define NEXT_FIT
+#define NEXT_FITx
 
 /* $begin mallocmacros */
 /* Basic constants and macros */
@@ -66,10 +66,16 @@ team_t team = {
 /* Given block ptr bp, compute address of next and previous blocks */
 #define NEXT_BLKP(bp)  ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE))) //line:vm:mm:nextblkp
 #define PREV_BLKP(bp)  ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE))) //line:vm:mm:prevblkp
+
+#define PREV_FREE(bp) (*(char **)(bp))
+#define NEXT_FREE(bp) (*(char **)(bp + WSIZE))
+
 /* $end mallocmacros */
 
 /* Global variables */
-static char *heap_listp = 0;  /* Pointer to first block */  
+static char *heap_listp = 0;  /* Pointer to first block */
+static char *first_free; 
+static char *last_free;
 #ifdef NEXT_FIT
 static char *rover;           /* Next fit rover */
 #endif
@@ -79,6 +85,7 @@ static void *extend_heap(size_t words);
 static void place(void *bp, size_t asize);
 static void *find_fit(size_t asize);
 static void *coalesce(void *bp);
+static void link_prev_to_next(void *bp);
 static void printblock(void *bp); 
 static void checkheap(int verbose);
 static void checkblock(void *bp);
@@ -105,8 +112,15 @@ int mm_init(void)
     /* $begin mminit */
 
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
+    
+    first_free = heap_listp + (2 * WSIZE);
+    
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL) 
         return -1;
+    PREV_FREE(first_free) = NULL;
+    NEXT_FREE(first_free) = NULL;
+    last_free = first_free;
+    
     return 0;
 }
 /* $end mminit */
@@ -117,6 +131,7 @@ int mm_init(void)
 /* $begin mmmalloc */
 void *mm_malloc(size_t size) 
 {
+    //printf("Malloc called with %d\n", size);
     size_t asize;      /* Adjusted block size */
     size_t extendsize; /* Amount to extend heap if no fit */
     char *bp;      
@@ -146,6 +161,7 @@ void *mm_malloc(size_t size)
     extendsize = MAX(asize,CHUNKSIZE);                 //line:vm:mm:growheap1
     if ((bp = extend_heap(extendsize/WSIZE)) == NULL)  
         return NULL;                                  //line:vm:mm:growheap2
+    //add_between_linked_list(bp, asize);
     place(bp, asize);                                 //line:vm:mm:growheap3
     return bp;
 } 
@@ -157,6 +173,7 @@ void *mm_malloc(size_t size)
 /* $begin mmfree */
 void mm_free(void *bp)
 {
+    //printf("Free called with %p\n", bp);
     /* $end mmfree */
     if (bp == 0) 
         return;
@@ -183,31 +200,63 @@ static void *coalesce(void *bp)
 {
     size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+    
     size_t size = GET_SIZE(HDRP(bp));
 
-    if (prev_alloc && next_alloc) {            /* Case 1 */
+    if (prev_alloc && next_alloc) {            /* Case 1 */        
+        NEXT_FREE(bp) = first_free;
+        PREV_FREE(bp) = NULL;
+        if (first_free != NULL)
+            PREV_FREE(first_free) = bp;
+        first_free = bp;
+        
         return bp;
     }
 
     else if (prev_alloc && !next_alloc) {      /* Case 2 */
+        link_prev_to_next(NEXT_BLKP(bp));
+        
+        NEXT_FREE(bp) = first_free;
+        PREV_FREE(bp) = NULL;
+        if (first_free != NULL)
+            PREV_FREE(first_free) = bp;
+        first_free = bp;
+    
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(bp), PACK(size, 0));
         PUT(FTRP(bp), PACK(size,0));
     }
 
     else if (!prev_alloc && next_alloc) {      /* Case 3 */
+        link_prev_to_next(PREV_BLKP(bp));
+    
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
         PUT(FTRP(bp), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
+        
+        NEXT_FREE(bp) = first_free;
+        PREV_FREE(bp) = NULL;
+        if (first_free != NULL)
+            PREV_FREE(first_free) = bp;
+        first_free = bp;
     }
 
     else {                                     /* Case 4 */
+        link_prev_to_next(PREV_BLKP(bp));
+        link_prev_to_next(NEXT_BLKP(bp));
+        
         size += GET_SIZE(HDRP(PREV_BLKP(bp))) + 
             GET_SIZE(FTRP(NEXT_BLKP(bp)));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
+        
+        NEXT_FREE(bp) = first_free;
+        PREV_FREE(bp) = NULL;
+        if (first_free != NULL)
+            PREV_FREE(first_free) = bp;
+        first_free = bp;
     }
     /* $end mmfree */
 #ifdef NEXT_FIT
@@ -221,11 +270,27 @@ static void *coalesce(void *bp)
 }
 /* $end mmfree */
 
+static void link_prev_to_next(void *bp) {
+    if (bp == NULL)
+        return;
+    if (PREV_FREE(bp) != NULL) {
+        NEXT_FREE(PREV_FREE(bp)) = NEXT_FREE(bp);
+    } else {
+        //if (NEXT_FREE(bp) != NULL)
+        first_free = NEXT_FREE(bp);
+    }
+    
+    if (NEXT_FREE(bp) != NULL) {
+        PREV_FREE(NEXT_FREE(bp)) = PREV_FREE(bp);
+    }
+}
+
 /*
  * mm_realloc - Naive implementation of realloc
  */
 void *mm_realloc(void *ptr, size_t size)
 {
+    //printf("Realloc called with %p, %d\n", ptr, size);
     size_t oldsize;
     void *newptr;
 
@@ -288,8 +353,27 @@ static void *extend_heap(size_t words)
     PUT(HDRP(bp), PACK(size, 0));         /* Free block header */   //line:vm:mm:freeblockhdr
     PUT(FTRP(bp), PACK(size, 0));         /* Free block footer */   //line:vm:mm:freeblockftr
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */ //line:vm:mm:newepihdr
+    
+    PREV_FREE(bp) = NULL;
+    NEXT_FREE(bp) = NULL;
+    
+    /*
+    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
+    size = GET_SIZE(HDRP(bp));
 
-    /* Coalesce if the previous block was free */
+    if (!prev_alloc) {
+        link_prev_to_next(PREV_BLKP(bp));
+    
+        size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+        PUT(FTRP(bp), PACK(size, 0));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+        
+        NEXT_FREE(bp) = first_free;
+        PREV_FREE(bp) = NULL;
+        PREV_FREE(first_free) = bp;
+    }
+    */
     return coalesce(bp);                                          //line:vm:mm:returnblock
 }
 /* $end mmextendheap */
@@ -305,14 +389,21 @@ static void place(void *bp, size_t asize)
 {
     size_t csize = GET_SIZE(HDRP(bp));   
 
-    if ((csize - asize) >= (2*DSIZE)) { 
+    if ((csize - asize) >= (2*DSIZE)) {
         PUT(HDRP(bp), PACK(asize, 1));
         PUT(FTRP(bp), PACK(asize, 1));
+        
+        link_prev_to_next(bp);
+        
         bp = NEXT_BLKP(bp);
         PUT(HDRP(bp), PACK(csize-asize, 0));
         PUT(FTRP(bp), PACK(csize-asize, 0));
+        
+        coalesce(bp);
     }
     else { 
+        link_prev_to_next(bp);
+    
         PUT(HDRP(bp), PACK(csize, 1));
         PUT(FTRP(bp), PACK(csize, 1));
     }
@@ -349,7 +440,7 @@ static void *find_fit(size_t asize)
     /* First-fit search */
     void *bp;
 
-    for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
+    for (bp = first_free; bp != NULL; bp = NEXT_FREE(bp)) {
         if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
             return bp;
         }
