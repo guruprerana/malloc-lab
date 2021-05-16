@@ -70,42 +70,15 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
 
-/* Private global variables */
-static char *mem_heap; /* Points to first byte of heap */
-static char *mem_brk; /* Points to last byte of heap plus 1 */
-static char *mem_max_addr; /* Max legal heap addr plus 1*/
-
-/*
-* mem_init - Initialize the memory system model
-*/
-void mem_init(void) {
-    mem_heap = (char *)Malloc(MAX_HEAP);
-    mem_brk = (char *)mem_heap;
-    mem_max_addr = (char *)(mem_heap + MAX_HEAP);
-}
-
-/*
-* mem_sbrk - Simple model of the sbrk function. Extends the heap
-* by incr bytes and returns the start address of the new area. In
-* this model, the heap cannot be shrunk.
-*/
-void *mem_sbrk(int incr) {
-    char *old_brk = mem_brk;
-
-    if ((incr < 0) || ((mem_brk + incr) > mem_max_addr)) {
-        errno = ENOMEM;
-        fprintf(stderr, "ERROR: mem_sbrk failed. Ran out of memory...\n");
-        return (void *)-1;
-    }
-    mem_brk += incr;
-    return (void *)old_brk;
-}
 
 /* 
  * mm_init - initialize the malloc package.
  */
 int mm_init(void) {
     /* Create the initial empty heap */
+    mem_init();
+    void *heap_listp;
+    
     if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1)
         return -1;
     PUT(heap_listp, 0); /* Alignment padding */
@@ -120,7 +93,7 @@ int mm_init(void) {
     return 0;
 }
 
-static void *extend_heap(size_t words) {
+void *extend_heap(size_t words) {
     char *bp;
     size_t size;
 
@@ -171,13 +144,14 @@ void *mm_malloc(size_t size) {
     return bp;
 }
 
-static void *find_fit(size_t asize) {
+void *find_fit(size_t asize) {
     /* First get a pointer to the first block */
-    char *curr_block = mem_heap + WSIZE;
+    char *curr_block = mem_heap_lo() + WSIZE;
     int found = 0;
     while (1) {
-        if (GET_ALLOC(curr_block) && GET_SIZE(curr_block) == 0) {
-            /* reached epilogue */
+        if ((GET_ALLOC(curr_block) && GET_SIZE(curr_block) == 0) || 
+                curr_block - (char *) mem_heap_lo() >= mem_heapsize()) {
+            /* reached epilogue or beyond heap */
             break;
         } else if (!GET_ALLOC(curr_block) &&
                    (GET_SIZE(curr_block) >= asize + (2 * DSIZE) || 
@@ -185,7 +159,7 @@ static void *find_fit(size_t asize) {
             found = 1;
             break;
         }
-        curr_block += GET_SIZE(curr_block)
+        curr_block += GET_SIZE(curr_block);
     }
     if (found) {
         return (void *) (curr_block + WSIZE);
@@ -193,7 +167,7 @@ static void *find_fit(size_t asize) {
     return NULL;
 }
 
-static void place(void *bp, size_t asize) {
+void place(void *bp, size_t asize) {
     size_t avail_size = GET_SIZE(HDRP(bp));
     if (avail_size == asize) {
         PUT(HDRP(bp), PACK(asize, 1));
@@ -221,8 +195,7 @@ void mm_free(void *bp) {
     coalesce(bp);
 }
 
-static void *coalesce(void *bp)
-{
+void *coalesce(void *bp) {
     size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
     size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
     size_t size = GET_SIZE(HDRP(bp));
@@ -251,16 +224,15 @@ static void *coalesce(void *bp)
 /*
  * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
  */
-void *mm_realloc(void *ptr, size_t size)
-{
+void *mm_realloc(void *ptr, size_t size) {
     void *oldptr = ptr;
     void *newptr;
-    size_t copySize;
+    size_t copySize = GET_SIZE(HDRP(oldptr));
     
     newptr = mm_malloc(size);
     if (newptr == NULL)
       return NULL;
-    copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);
+    // copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);
     if (size < copySize)
       copySize = size;
     memcpy(newptr, oldptr, copySize);
