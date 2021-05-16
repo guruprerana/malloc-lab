@@ -5,11 +5,6 @@ extern void *mm_malloc (size_t size);
 extern void mm_free(void *bp);
 extern void *mm_realloc(void *ptr, size_t size);
 
-extern void *extend_heap(size_t words);
-extern void *find_fit(size_t asize);
-extern void place(void *bp, size_t asize);
-extern void *coalesce(void *bp);
-
 
 /* 
  * Students work in teams of one or two.  Teams enter their team name, 
