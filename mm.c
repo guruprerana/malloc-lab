@@ -70,6 +70,8 @@ team_t team = {
 #define PREV_FREE(bp) (*(char **)(bp))
 #define NEXT_FREE(bp) (*(char **)(bp + WSIZE))
 
+#define DEBUG
+
 /* $end mallocmacros */
 
 /* Global variables */
@@ -163,6 +165,10 @@ void *mm_malloc(size_t size)
         return NULL;                                  //line:vm:mm:growheap2
     //add_between_linked_list(bp, asize);
     place(bp, asize);                                 //line:vm:mm:growheap3
+    
+    #ifdef DEBUG
+        mm_check();
+    #endif
     return bp;
 } 
 /* $end mmmalloc */
@@ -189,6 +195,10 @@ void mm_free(void *bp)
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
     coalesce(bp);
+    
+    #ifdef DEBUG
+        mm_check();
+    #endif
 }
 
 /* $end mmfree */
@@ -319,6 +329,10 @@ void *mm_realloc(void *ptr, size_t size)
 
     /* Free the old block. */
     mm_free(ptr);
+    
+    #ifdef DEBUG
+        mm_check();
+    #endif
 
     return newptr;
 }
@@ -504,7 +518,44 @@ void checkheap(int verbose)
         printf("Bad epilogue header\n");
 }
 
+int mm_check(){
 
+    // Is every block in the free list marked as free?
+    // Do the pointers in a heap block point to valid heap addresses?
+    void *bp_i, *prev;
+    for (bp_i = first_free; bp_i != NULL; bp_i = NEXT_FREE(bp_i)) {
+        if (bp_i != first_free){
+            if (PREV_FREE(bp_i) != NULL){
+                prev = PREV_FREE(bp_i);
+                if (((int) prev <= (int) mem_heap_lo()) || ((int) prev >= (int) mem_heap_hi())){
+                    printf("pointer %p is not a valid heap address", prev);
+                    return -1;
+                }
+            }
+        }
+        if (((int) bp_i <= (int) mem_heap_lo()) || ((int) bp_i >= (int) mem_heap_hi())){
+            printf("pointer %p is not a valid heap address", bp_i);
+            return -1;
+        }
+        if (GET_ALLOC(HDRP(bp_i))){
+            printf("An allocated block is marked as free");
+            return -1;
+        }
+    }
+
+    //Are there any contiguous free blocks that somehow escaped coalescing?
+    int prev_alloc = 1;
+    int curr_alloc;
+    for (bp_i = mem_heap_lo(); (int) bp_i <= (int) mem_heap_hi(); bp_i = NEXT_BLKP(bp_i)){
+        curr_alloc = GET_ALLOC(HDRP(bp_i));
+        if ((! prev_alloc) && (! curr_alloc)){
+            printf("there are two contiguous free blocks");
+            return -1;
+        }
+        prev_alloc = curr_alloc;
+    }
+    return 0;
+}
 
 
 
