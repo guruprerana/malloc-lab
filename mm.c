@@ -456,6 +456,9 @@ static void place(void *bp, size_t asize)
 
 /* 
  * find_fit - Find a fit for a block with asize bytes 
+ * simply traverses the linked list, starting at the first free
+ * then taking the next pointer until the next points to NULL
+ * stopping when there is a free block with sufficient size
  */
 /* $begin mmfirstfit */
 /* $begin mmfirstfit-proto */
