@@ -128,8 +128,9 @@ int mm_init(void)
 /* $end mminit */
 
 /* 
- * mm_malloc - Allocate a block with at least size bytes of 
- * payload plus header and footer.
+ * mm_malloc - Allocate a block with sufficient size
+ * searching the list through a doubly linked list,
+ * described more specifically in the find_fit function.
  */
 /* $begin mmmalloc */
 void *mm_malloc(size_t size) 
