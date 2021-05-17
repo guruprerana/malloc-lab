@@ -305,6 +305,10 @@ static void *coalesce(void *bp)
 }
 /* $end mmfree */
 
+/* function written as to do the pointer operation
+*  necessary during coalesccing as explained in the comment above
+*  the coalescing function
+*/
 static void link_prev_to_next(void *bp) {
     if (bp == NULL)
         return;
