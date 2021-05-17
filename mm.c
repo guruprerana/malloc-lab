@@ -326,6 +326,7 @@ static void link_prev_to_next(void *bp) {
 
 /*
  * mm_realloc - Naive implementation of realloc
+ * using mm_malloc and mm_free only
  */
 void *mm_realloc(void *ptr, size_t size)
 {
