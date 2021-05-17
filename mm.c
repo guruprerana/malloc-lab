@@ -176,7 +176,9 @@ void *mm_malloc(size_t size)
 /* $end mmmalloc */
 
 /* 
- * mm_free - Frees the block
+ * mm_free - Frees the block,
+ * ensuring that the alloction in the header and footer
+ * are set to 0, then coalesces as needed.
  */
 /* $begin mmfree */
 void mm_free(void *bp)
