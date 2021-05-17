@@ -92,7 +92,8 @@ static void checkheap(int verbose);
 static void checkblock(void *bp);
 
 /* 
- * mm_init - Initialize the memory manager 
+ * mm_init - Initialize the memory manager, specifically leaving space for 
+ * the header and the footer, and the payload.
  */
 /* $begin mminit */
 int mm_init(void) 
