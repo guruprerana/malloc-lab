@@ -5,6 +5,7 @@ extern void *mm_malloc (size_t size);
 extern void mm_free(void *bp);
 extern void *mm_realloc(void *ptr, size_t size);
 
+void mm_check();
 
 /* 
  * Students work in teams of one or two.  Teams enter their team name, 
