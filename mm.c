@@ -550,8 +550,15 @@ void checkheap(int verbose)
     if ((GET_SIZE(HDRP(bp)) != 0) || !(GET_ALLOC(HDRP(bp))))
         printf("Bad epilogue header\n");
 }
+/* 
+* performs a check
+* on the structure of the memory
+* answering the questionas indicated inside
+* the commments of the function
+*/
 
-int mm_check(){
+
+void mm_check(){
 
     // Is every block in the free list marked as free?
     // Do the pointers in a heap block point to valid heap addresses?
@@ -562,17 +569,14 @@ int mm_check(){
                 prev = PREV_FREE(bp_i);
                 if (((int) prev <= (int) mem_heap_lo()) || ((int) prev >= (int) mem_heap_hi())){
                     printf("pointer %p is not a valid heap address", prev);
-                    return -1;
                 }
             }
         }
         if (((int) bp_i <= (int) mem_heap_lo()) || ((int) bp_i >= (int) mem_heap_hi())){
             printf("pointer %p is not a valid heap address", bp_i);
-            return -1;
         }
         if (GET_ALLOC(HDRP(bp_i))){
             printf("An allocated block is marked as free");
-            return -1;
         }
     }
 
@@ -583,11 +587,9 @@ int mm_check(){
         curr_alloc = GET_ALLOC(HDRP(bp_i));
         if ((! prev_alloc) && (! curr_alloc)){
             printf("there are two contiguous free blocks");
-            return -1;
         }
         prev_alloc = curr_alloc;
     }
-    return 0;
 }
 
 
