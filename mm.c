@@ -207,7 +207,28 @@ void mm_free(void *bp)
 
 /* $end mmfree */
 /*
- * coalesce - Boundary tag coalescing. Return ptr to coalesced block
+ * coalesces block
+ * uses a LIFO policy, so regardless of the case, ensures that
+ * ensures that the empty block is on the head of the linked list
+ * (i.e. it is the first free
+ *       there is no previous block, 
+ *       next points to what was first previously
+ *       prev of what was first previously points to it)
+ * to coalesce proprely deals with 3 cases.
+ * 1. both blocks allocated
+ *      no coalescing necessary
+ * 2/3. one adjacent block is allocated, the other is not
+ *      then the free block and the unallocated block is coalesced
+ *      as a result, 
+ *      e.g. is left block is free, then the 
+ *      left's previous pointer now points next to the right block
+ *      and the right block's previous pointer now points to the left's previous
+ * 4. neither blocks allocated
+ *      then in this case, 
+ *      the left's previous pointer's next pointer now points
+ *      to the next pointer of the rightmost block
+ *      the right's next pointer's previous pointer now points
+ *      to the previous pointer of the leftmost block
  */
 /* $begin mmfree */
 static void *coalesce(void *bp) 
