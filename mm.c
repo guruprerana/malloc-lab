@@ -75,11 +75,11 @@ team_t team = {
 
 /* Global variables */
 static char *heap_listp = 0;  /* Pointer to first block */
-static char *first_free; 
-static char *last_free;
-#ifdef NEXT_FIT
-static char *rover;           /* Next fit rover */
-#endif
+
+#define N_SEGMENTS 20
+
+static char *segs[N_SEGMENTS];
+static int used_segs[N_SEGMENTS];
 
 /* Function prototypes for internal helper routines */
 static void *extend_heap(size_t words);
@@ -87,9 +87,33 @@ static void place(void *bp, size_t asize);
 static void *find_fit(size_t asize);
 static void *coalesce(void *bp);
 static void link_prev_to_next(void *bp);
+static int get_segment(size_t size);
+static void insert_block(char *bp, size_t size);
 static void printblock(void *bp); 
 static void checkheap(int verbose);
 static void checkblock(void *bp);
+
+static int get_segment(size_t size) {
+    int seg = 0;
+    size = size >> 2;
+    while (size && seg < (N_SEGMENTS - 1)) {
+        size = size >> 1;
+        seg++;
+    }
+    return seg;
+}
+
+static void insert_block(char *bp, size_t size) {
+    int seg = get_segment(size);
+    PREV_FREE(bp) = NULL;
+    if (segs[seg] != NULL) {
+        PREV_FREE(segs[seg]) = bp;
+        NEXT_FREE(bp) = segs[seg];
+    } else {
+        NEXT_FREE(bp) = NULL;
+    }
+    segs[seg] = bp;
+}
 
 /* 
  * mm_init - Initialize the memory manager, specifically leaving space for 
@@ -108,20 +132,16 @@ int mm_init(void)
     heap_listp += (2*WSIZE);                     //line:vm:mm:endinit  
     /* $end mminit */
 
-#ifdef NEXT_FIT
-    rover = heap_listp;
-#endif
     /* $begin mminit */
 
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
-    
-    first_free = heap_listp + (2 * WSIZE);
+    int seg;
+    for (seg = 0; seg < N_SEGMENTS; seg++) {
+        segs[seg] = NULL;
+    }
     
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL) 
         return -1;
-    PREV_FREE(first_free) = NULL;
-    NEXT_FREE(first_free) = NULL;
-    last_free = first_free;
     
     return 0;
 }
@@ -233,73 +253,37 @@ void mm_free(void *bp)
 /* $begin mmfree */
 static void *coalesce(void *bp) 
 {
-    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
-    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+    int prev_alloc = GET_ALLOC(HDRP(PREV_BLKP(bp)));
+    int next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
     
     size_t size = GET_SIZE(HDRP(bp));
 
-    if (prev_alloc && next_alloc) {            /* Case 1 */        
-        NEXT_FREE(bp) = first_free;
-        PREV_FREE(bp) = NULL;
-        if (first_free != NULL)
-            PREV_FREE(first_free) = bp;
-        first_free = bp;
-        
-        return bp;
-    }
-
-    else if (prev_alloc && !next_alloc) {      /* Case 2 */
+    if (prev_alloc && !next_alloc) {      /* Case 1 */
         link_prev_to_next(NEXT_BLKP(bp));
-        
-        NEXT_FREE(bp) = first_free;
-        PREV_FREE(bp) = NULL;
-        if (first_free != NULL)
-            PREV_FREE(first_free) = bp;
-        first_free = bp;
-    
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
-        PUT(HDRP(bp), PACK(size, 0));
-        PUT(FTRP(bp), PACK(size,0));
     }
 
-    else if (!prev_alloc && next_alloc) {      /* Case 3 */
+    else if (!prev_alloc && next_alloc) { /* Case 2 */
         link_prev_to_next(PREV_BLKP(bp));
-    
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
-        PUT(FTRP(bp), PACK(size, 0));
-        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
-        
-        NEXT_FREE(bp) = first_free;
-        PREV_FREE(bp) = NULL;
-        if (first_free != NULL)
-            PREV_FREE(first_free) = bp;
-        first_free = bp;
     }
 
-    else {                                     /* Case 4 */
+    else if (!prev_alloc && !next_alloc) {  /* Case 3 */
         link_prev_to_next(PREV_BLKP(bp));
         link_prev_to_next(NEXT_BLKP(bp));
         
         size += GET_SIZE(HDRP(PREV_BLKP(bp))) + 
-            GET_SIZE(FTRP(NEXT_BLKP(bp)));
-        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+            GET_SIZE(HDRP(NEXT_BLKP(bp)));
+
         bp = PREV_BLKP(bp);
-        
-        NEXT_FREE(bp) = first_free;
-        PREV_FREE(bp) = NULL;
-        if (first_free != NULL)
-            PREV_FREE(first_free) = bp;
-        first_free = bp;
     }
     /* $end mmfree */
-#ifdef NEXT_FIT
-    /* Make sure the rover isn't pointing into the free block */
-    /* that we just coalesced */
-    if ((rover > (char *)bp) && (rover < NEXT_BLKP(bp))) 
-        rover = bp;
-#endif
+
+    PUT(HDRP(bp), PACK(size, 0));
+    PUT(FTRP(bp), PACK(size, 0));
+
+    insert_block(bp, size);
     /* $begin mmfree */
     return bp;
 }
@@ -312,11 +296,11 @@ static void *coalesce(void *bp)
 static void link_prev_to_next(void *bp) {
     if (bp == NULL)
         return;
+    
     if (PREV_FREE(bp) != NULL) {
         NEXT_FREE(PREV_FREE(bp)) = NEXT_FREE(bp);
     } else {
-        //if (NEXT_FREE(bp) != NULL)
-        first_free = NEXT_FREE(bp);
+        segs[get_segment(GET_SIZE(HDRP(bp)))] = NEXT_FREE(bp);
     }
     
     if (NEXT_FREE(bp) != NULL) {
@@ -398,26 +382,6 @@ static void *extend_heap(size_t words)
     PUT(FTRP(bp), PACK(size, 0));         /* Free block footer */   //line:vm:mm:freeblockftr
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); /* New epilogue header */ //line:vm:mm:newepihdr
     
-    PREV_FREE(bp) = NULL;
-    NEXT_FREE(bp) = NULL;
-    
-    /*
-    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
-    size = GET_SIZE(HDRP(bp));
-
-    if (!prev_alloc) {
-        link_prev_to_next(PREV_BLKP(bp));
-    
-        size += GET_SIZE(HDRP(PREV_BLKP(bp)));
-        PUT(FTRP(bp), PACK(size, 0));
-        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        bp = PREV_BLKP(bp);
-        
-        NEXT_FREE(bp) = first_free;
-        PREV_FREE(bp) = NULL;
-        PREV_FREE(first_free) = bp;
-    }
-    */
     return coalesce(bp);                                          //line:vm:mm:returnblock
 }
 /* $end mmextendheap */
@@ -434,10 +398,10 @@ static void place(void *bp, size_t asize)
     size_t csize = GET_SIZE(HDRP(bp));   
 
     if ((csize - asize) >= (2*DSIZE)) {
+        link_prev_to_next(bp);
+
         PUT(HDRP(bp), PACK(asize, 1));
         PUT(FTRP(bp), PACK(asize, 1));
-        
-        link_prev_to_next(bp);
         
         bp = NEXT_BLKP(bp);
         PUT(HDRP(bp), PACK(csize-asize, 0));
@@ -465,35 +429,19 @@ static void place(void *bp, size_t asize)
 static void *find_fit(size_t asize)
 /* $end mmfirstfit-proto */
 {
-    /* $end mmfirstfit */
-
-#ifdef NEXT_FIT 
-    /* Next fit search */
-    char *oldrover = rover;
-
-    /* Search from the rover to the end of list */
-    for ( ; GET_SIZE(HDRP(rover)) > 0; rover = NEXT_BLKP(rover))
-        if (!GET_ALLOC(HDRP(rover)) && (asize <= GET_SIZE(HDRP(rover))))
-            return rover;
-
-    /* search from start of list to old rover */
-    for (rover = heap_listp; rover < oldrover; rover = NEXT_BLKP(rover))
-        if (!GET_ALLOC(HDRP(rover)) && (asize <= GET_SIZE(HDRP(rover))))
-            return rover;
-
-    return NULL;  /* no fit found */
-#else 
     /* $begin mmfirstfit */
-    /* First-fit search */
+    /* Linked list of free blocks search */
     void *bp;
+    int seg;
 
-    for (bp = first_free; bp != NULL; bp = NEXT_FREE(bp)) {
-        if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
-            return bp;
+    for (seg = get_segment(asize); seg < N_SEGMENTS; seg++) {
+        for (bp = segs[seg]; bp != NULL; bp = NEXT_FREE(bp)) {
+            if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
+                return bp;
+            }
         }
     }
     return NULL; /* No fit */
-#endif
 }
 /* $end mmfirstfit */
 
