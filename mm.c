@@ -1,7 +1,13 @@
 /*
- * Implements explicit free list
- * by creating adoubly linked free list
+ * Implements segregated explicit free list
+ * by creating doubly linked free lists
  * with a previous and next pointer in every free block,
+ * 
+ * The lists are segregated by length in powers of two:
+ * Free blocks of length 1-4 are in the first list `segs[0]`
+ * 4-8 in `segs[1]`
+ * 8-16 in `segs[2]`
+ * and so on
  * 
  * In this approach, a block contains a heacer, payload, and a footer.
  * Part of the payload points to the previous and next block. 
@@ -34,16 +40,11 @@ team_t team = {
     "maika.edberg@polytechnique.edu"
 };
 
-/*
- * If NEXT_FIT defined use next fit search, else use first-fit search 
- */
-#define NEXT_FITx
-
 /* $begin mallocmacros */
 /* Basic constants and macros */
 #define WSIZE       4       /* Word and header/footer size (bytes) */ //line:vm:mm:beginconst
 #define DSIZE       8       /* Double word size (bytes) */
-#define CHUNKSIZE  (1<<12)  /* Extend heap by this amount (bytes) */  //line:vm:mm:endconst 
+#define CHUNKSIZE  (1<<6)  /* Extend heap by this amount (bytes) */  //line:vm:mm:endconst 
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))  
 
@@ -69,7 +70,8 @@ team_t team = {
 #define PREV_FREE(bp) (*(char **)(bp))
 #define NEXT_FREE(bp) (*(char **)(bp + WSIZE))
 
-#define DEBUG
+/* Set this to DEBUG to run the consistency checker */
+#define DEBUGx
 
 /* $end mallocmacros */
 
@@ -78,6 +80,9 @@ static char *heap_listp = 0;  /* Pointer to first block */
 
 #define N_SEGMENTS 20
 
+/* Array of fixed size to store the pointers to first blocks
+ * in each segregated free list
+ */
 static char *segs[N_SEGMENTS];
 static int used_segs[N_SEGMENTS];
 
@@ -93,6 +98,9 @@ static void printblock(void *bp);
 static void checkheap(int verbose);
 static void checkblock(void *bp);
 
+/* get_segment - This function computes the segment index to use
+ * for a particular block given its block size
+ */
 static int get_segment(size_t size) {
     int seg = 0;
     size = size >> 2;
@@ -103,6 +111,9 @@ static int get_segment(size_t size) {
     return seg;
 }
 
+/* insert_block - This function inserts a free block into the
+ * right segment given a pointer to it and its size
+ */
 static void insert_block(char *bp, size_t size) {
     int seg = get_segment(size);
     PREV_FREE(bp) = NULL;
@@ -118,6 +129,7 @@ static void insert_block(char *bp, size_t size) {
 /* 
  * mm_init - Initialize the memory manager, specifically leaving space for 
  * the header and the footer, and the payload.
+ * Also initializes the segmented free lists pointers
  */
 /* $begin mminit */
 int mm_init(void) 
@@ -134,12 +146,12 @@ int mm_init(void)
 
     /* $begin mminit */
 
-    /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     int seg;
     for (seg = 0; seg < N_SEGMENTS; seg++) {
         segs[seg] = NULL;
     }
-    
+
+    /* Extend the empty heap with a free block of CHUNKSIZE bytes */    
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL) 
         return -1;
     
@@ -230,7 +242,7 @@ void mm_free(void *bp)
  * coalesces block
  * uses a LIFO policy, so regardless of the case, ensures that
  * ensures that the empty block is on the head of the linked list
- * (i.e. it is the first free
+ * (i.e. it is the first element in the linked list
  *       there is no previous block, 
  *       next points to what was first previously
  *       prev of what was first previously points to it)
@@ -292,6 +304,7 @@ static void *coalesce(void *bp)
 /* function written as to do the pointer operation
 *  necessary during coalesccing as explained in the comment above
 *  the coalescing function
+*  It removes the block pointed by bp from the linked list
 */
 static void link_prev_to_next(void *bp) {
     if (bp == NULL)
@@ -420,9 +433,11 @@ static void place(void *bp, size_t asize)
 
 /* 
  * find_fit - Find a fit for a block with asize bytes 
- * simply traverses the linked list, starting at the first free
+ * simply traverses the linked lists, starting at the right linked list
  * then taking the next pointer until the next points to NULL
  * stopping when there is a free block with sufficient size
+ * 
+ * The right segment to search in is determined by using the get_segment function
  */
 /* $begin mmfirstfit */
 /* $begin mmfirstfit-proto */
@@ -511,20 +526,23 @@ void mm_check(){
     // Is every block in the free list marked as free?
     // Do the pointers in a heap block point to valid heap addresses?
     void *bp_i, *prev;
-    for (bp_i = first_free; bp_i != NULL; bp_i = NEXT_FREE(bp_i)) {
-        if (bp_i != first_free){
-            if (PREV_FREE(bp_i) != NULL){
-                prev = PREV_FREE(bp_i);
-                if (((int) prev <= (int) mem_heap_lo()) || ((int) prev >= (int) mem_heap_hi())){
-                    printf("pointer %p is not a valid heap address", prev);
+    int seg;
+    for (seg = 0; seg < N_SEGMENTS; seg++) {
+        for (bp_i = segs[seg]; bp_i != NULL; bp_i = NEXT_FREE(bp_i)) {
+            if (bp_i != segs[seg]){
+                if (PREV_FREE(bp_i) != NULL){
+                    prev = PREV_FREE(bp_i);
+                    if (((int) prev <= (int) mem_heap_lo()) || ((int) prev >= (int) mem_heap_hi())){
+                        printf("pointer %p is not a valid heap address", prev);
+                    }
                 }
             }
-        }
-        if (((int) bp_i <= (int) mem_heap_lo()) || ((int) bp_i >= (int) mem_heap_hi())){
-            printf("pointer %p is not a valid heap address", bp_i);
-        }
-        if (GET_ALLOC(HDRP(bp_i))){
-            printf("An allocated block is marked as free");
+            if (((int) bp_i <= (int) mem_heap_lo()) || ((int) bp_i >= (int) mem_heap_hi())){
+                printf("pointer %p is not a valid heap address", bp_i);
+            }
+            if (GET_ALLOC(HDRP(bp_i))){
+                printf("An allocated block is marked as free");
+            }
         }
     }
 
