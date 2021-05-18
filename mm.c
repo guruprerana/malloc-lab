@@ -13,6 +13,15 @@
  * Part of the payload points to the previous and next block. 
  * Realloc is implemented directly using mm_malloc and mm_free.
  *
+ * Before arriving at the segregated free lists implemetation, we tried
+ * implicit free blocks implementation and free lists implementation without
+ * segregation
+ * 
+ * As a starting point for our implementation we used the code from 
+ * the textbook CSAPP which we found at this link
+ *
+ * http://csapp.cs.cmu.edu/3e/ics3/code/vm/malloc/mm.c
+ *
  */
 #include <stdio.h>
 #include <stdlib.h>
