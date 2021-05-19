@@ -93,7 +93,6 @@ static char *heap_listp = 0;  /* Pointer to first block */
  * in each segregated free list
  */
 static char *segs[N_SEGMENTS];
-static int used_segs[N_SEGMENTS];
 
 /* Function prototypes for internal helper routines */
 static void *extend_heap(size_t words);
